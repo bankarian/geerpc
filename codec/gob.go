@@ -27,13 +27,13 @@ func (c *GobCodec) Write(h *Header, body interface{}) (err error) {
 	}()
 	if err = c.enc.Encode(h); err != nil {
 		log.Println("rpc: gob error encoding header:", err)
-		return
+		return err
 	}
 	if err = c.enc.Encode(body); err != nil {
 		log.Println("rpc: gob error encoding body:", err)
-		return
+		return err
 	}
-	return
+	return nil
 }
 
 func (c *GobCodec) ReadHeader(h *Header) error {
