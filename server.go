@@ -2,12 +2,12 @@ package geerpc
 
 import (
 	"encoding/json"
-	"fmt"
 	"geerpc/codec"
 	"io"
 	"log"
 	"net"
 	"reflect"
+	"sync"
 )
 
 type Option struct {
@@ -53,39 +53,51 @@ func (s *Server) Accept(lis net.Listener) {
 	}
 }
 
-func (s *Server) ServeConn(conn io.ReadWriteCloser) error {
+func (s *Server) ServeConn(conn io.ReadWriteCloser) {
 	// 1. json decode Option, getting codec function
 	// 2. read request: decode header, then body(argv)
 	// 3. handle request: read argv, write replyv, send response
 	var opt Option
 	if err := json.NewDecoder(conn).Decode(&opt); err != nil {
 		log.Println("rpc server: decode option error", err)
-		return err
+		return
 	}
 	if opt.MagicNumber != MagicNumber {
 		log.Printf("rpc server: invalid request magic number %x", opt.MagicNumber)
-		return fmt.Errorf("invalid request magic number %x", opt.MagicNumber)
+		return
 	}
+
 	cc := codec.NewCodecFuncMap[opt.CodecType](conn)
+	s.serve(cc)
+}
+
+func (s *Server) serve(cc codec.ICodec) {
+	// read request in order
+	// handle request concurrently
+	wg := new(sync.WaitGroup)
+	sending := new(sync.Mutex)
 	for {
 		var req request
 		if err := s.readRequest(cc, &req); err != nil {
-			if err == io.ErrUnexpectedEOF || err == io.EOF {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
-			return err
+			req.h.Error = err.Error()
+			s.sendResponse(cc, &req, sending)
+			continue
 		}
-		if err := s.handleRequest(cc, &req); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go s.handleRequest(cc, &req, wg, sending)
 	}
-	return nil
+	wg.Wait()
 }
 
 func (s *Server) readRequest(cc codec.ICodec, req *request) error {
 	var h codec.Header
 	if err := cc.ReadHeader(&h); err != nil {
-		log.Println("rpc server: read header error", err)
+		if err != io.EOF && err != io.ErrUnexpectedEOF {
+			log.Println("rpc server: read header error", err)
+		}
 		return err
 	}
 	req.h = &h
@@ -100,14 +112,17 @@ func (s *Server) readRequest(cc codec.ICodec, req *request) error {
 	return nil
 }
 
-func (s *Server) handleRequest(cc codec.ICodec, req *request) error {
+func (s *Server) handleRequest(cc codec.ICodec, req *request, wg *sync.WaitGroup, sending *sync.Mutex) {
+	defer wg.Done()
 	// TODO: just send back a string currently
 	req.replyv = reflect.ValueOf(req.argv.Interface())
+	s.sendResponse(cc, req, sending)
+}
 
-	// send response
+func (s *Server) sendResponse(cc codec.ICodec, req *request, sending *sync.Mutex) {
+	sending.Lock()
+	defer sending.Unlock()
 	if err := cc.Write(req.h, req.replyv.Interface()); err != nil {
 		log.Println("rpc server: send response error", err)
-		return err
 	}
-	return nil
 }
