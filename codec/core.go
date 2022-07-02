@@ -14,3 +14,18 @@ type ICodec interface {
 	ReadBody(b interface{}) error
 	Write(*Header, interface{}) error
 }
+
+type CodecType string
+const (
+	GobType  = "application/gob"
+	JsonType = "application/json"
+)
+
+type NewCodecFunc func(io.ReadWriteCloser) ICodec
+
+var NewCodecFuncMap map[CodecType]NewCodecFunc
+
+func init() {
+	NewCodecFuncMap = make(map[CodecType]NewCodecFunc)
+	NewCodecFuncMap[GobType] = NewGobCodec
+}

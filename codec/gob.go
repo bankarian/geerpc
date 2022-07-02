@@ -42,6 +42,7 @@ func (g *GobCodec) Write(h *Header, b interface{}) error {
 	}
 	if err := g.enc.Encode(b); err != nil {
 		log.Println("codec: encode body error", err)
+		return err
 	}
 	return nil
 }
