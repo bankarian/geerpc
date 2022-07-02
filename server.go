@@ -24,7 +24,7 @@ var DefaultOption = &Option{
 
 type request struct {
 	h *codec.Header
-	// we would use argv and replyv in details,
+	// we would use argv and replyv as value receivers,
 	// so use reflect.Value instead of interface{}
 	argv, replyv reflect.Value
 }
