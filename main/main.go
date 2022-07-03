@@ -1,12 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"geerpc"
-	"geerpc/codec"
 	"log"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -24,30 +23,25 @@ func main() {
 	addr := make(chan string)
 	go startServer(addr)
 
-	// client
-	conn, _ := net.Dial("tcp", <-addr)
-	defer func() {
-		conn.Close()
-	}()
 
+	client, _ := geerpc.Dial("tcp", <-addr)
+	defer func() {
+		client.Close()
+	}()
 	time.Sleep(time.Second)
 
-	// send option
-	_ = json.NewEncoder(conn).Encode(geerpc.DefaultOption)
-
-	// send requests
-	cc := codec.NewGobCodec(conn)
+	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
-		h := &codec.Header{
-			ServiceMethod: "Test.Hello",
-			Seq:           uint64(i),
-		}
-		_ = cc.Write(h, fmt.Sprintf("argv Seq=%d", h.Seq))
-
-		// get response
-		_ = cc.ReadHeader(h)
-		var reply string
-		_ = cc.ReadBody(&reply)
-		log.Println("reply:", reply)
+		wg.Add(1)
+		num := i
+		go func() {
+			defer wg.Done()
+			var reply string
+			if err := client.Call("Test.Hello", fmt.Sprintf("Hello %d", num), &reply); err != nil {
+				log.Fatal("rpc call error")
+			}
+			log.Println("reply ", reply)
+		}()
 	}
+	wg.Wait()
 }
