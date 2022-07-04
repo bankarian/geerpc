@@ -15,15 +15,15 @@ type methodType struct {
 type service struct {
 	name    string
 	typ     reflect.Type
-	val     reflect.Value
+	rcvr     reflect.Value
 	methods map[string]*methodType
 }
 
 func newService(rcvr interface{}) *service {
 	s := new(service)
-	s.val = reflect.ValueOf(rcvr)
+	s.rcvr = reflect.ValueOf(rcvr)
 	s.typ = reflect.TypeOf(rcvr)
-	s.name = reflect.Indirect(s.val).Type().Name()
+	s.name = reflect.Indirect(s.rcvr).Type().Name()
 	if !ast.IsExported(s.name) {
 		log.Fatalf("rpc server: invalid service name %s", s.name)
 	}
@@ -62,6 +62,16 @@ func (s *service) registerMethods() {
 		}
 		log.Printf("rpc server: register method %s.%s\n", s.name, m.Name)
 	}
+}
+
+func (s *service) call(name string, arg, reply interface{}) error {
+	method := s.methods[name]
+	res := method.method.Func.Call([]reflect.Value{
+		s.rcvr, reflect.ValueOf(arg),reflect.ValueOf(reply)})
+	if errVal := res[0].Interface(); errVal != nil {
+		return errVal.(error)
+	}
+	return nil
 }
 
 func isExportedOrBuiltin(t reflect.Type) bool {
