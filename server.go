@@ -126,3 +126,8 @@ func (s *Server) sendResponse(cc codec.ICodec, req *request, sending *sync.Mutex
 		log.Println("rpc server: send response error", err)
 	}
 }
+
+// Register a service to the server
+func Register(rcvr interface{}) error {
+	return nil
+}
