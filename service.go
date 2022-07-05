@@ -12,6 +12,29 @@ type methodType struct {
 	method    reflect.Method
 }
 
+func (m *methodType) newArgRcvr() reflect.Value {
+	var arg reflect.Value
+	// arg can be pointer, or value
+	if m.argType.Kind() == reflect.Ptr {
+		arg = reflect.New(m.argType.Elem())
+	} else {
+		arg = reflect.New(m.argType).Elem()
+	}
+	return arg
+}
+
+func (m *methodType) newReplyRcvr() reflect.Value {
+	// reply must be a pointer
+	reply := reflect.New(m.replyType.Elem())
+	switch m.replyType.Elem().Kind() {
+	case reflect.Map:
+		reply.Elem().Set(reflect.MakeMap(m.replyType.Elem()))
+	case reflect.Slice:
+		reply.Elem().Set(reflect.MakeSlice(m.replyType.Elem(), 0, 0))
+	}
+	return reply
+}
+
 type service struct {
 	name    string
 	typ     reflect.Type

@@ -2,11 +2,14 @@ package geerpc
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"geerpc/codec"
 	"io"
 	"log"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -27,12 +30,18 @@ type request struct {
 	// we would use argv and replyv as value receivers,
 	// so use reflect.Value instead of interface{}
 	argv, replyv reflect.Value
+	ser          *service
+	mName        string
 }
 
-type Server struct{}
+type Server struct {
+	services map[string]*service
+}
 
 func NewServer() *Server {
-	return &Server{}
+	return &Server{
+		services: make(map[string]*service),
+	}
 }
 
 var DefaultServer = NewServer()
@@ -94,40 +103,75 @@ func (s *Server) serve(cc codec.ICodec) {
 
 func (s *Server) readRequest(cc codec.ICodec, req *request) error {
 	var h codec.Header
+	req.h = &h
 	if err := cc.ReadHeader(&h); err != nil {
 		if err != io.EOF && err != io.ErrUnexpectedEOF {
 			log.Println("rpc server: read header error", err)
 		}
 		return err
 	}
-	req.h = &h
 
-	// TODO: assume that the type is string currently
-	req.argv = reflect.New(reflect.TypeOf(""))
-	if err := cc.ReadBody(req.argv.Interface()); err != nil {
+	ser, method, err := s.findServiceMethod(&h)
+	if err != nil {
+		log.Println("rpc server error:", err)
+		return err
+	}
+	req.argv = method.newArgRcvr()
+	req.replyv = method.newReplyRcvr()
+	req.ser = ser
+	req.mName = method.method.Name
+
+	argvi := req.argv.Interface()
+	if req.argv.Type().Kind() != reflect.Ptr {
+		// make sure the arg receiver is a pointer
+		argvi = req.argv.Addr().Interface()
+	}
+	if err := cc.ReadBody(argvi); err != nil {
 		log.Println("rpc server: read argv error", err)
 		return err
 	}
-
 	return nil
 }
 
 func (s *Server) handleRequest(cc codec.ICodec, req *request, wg *sync.WaitGroup, sending *sync.Mutex) {
 	defer wg.Done()
-	// TODO: just send back a string currently
-	req.replyv = reflect.ValueOf(req.argv.Interface())
+	req.ser.call(req.mName, req.argv.Interface(), req.replyv.Interface())
 	s.sendResponse(cc, req, sending)
 }
 
 func (s *Server) sendResponse(cc codec.ICodec, req *request, sending *sync.Mutex) {
 	sending.Lock()
 	defer sending.Unlock()
-	if err := cc.Write(req.h, req.replyv.Interface()); err != nil {
+	var body interface{}
+	if req.replyv == reflect.ValueOf(nil) {
+		body = struct{}{}
+	} else {
+		body = req.replyv.Interface()
+	}
+	if err := cc.Write(req.h, body); err != nil {
 		log.Println("rpc server: send response error", err)
 	}
 }
 
-// Register a service to the server
-func Register(rcvr interface{}) error {
-	return nil
+func (s *Server) findServiceMethod(h *codec.Header) (*service, *methodType, error) {
+	ss := strings.Split(h.ServiceMethod, ".")
+	if len(ss) != 2 {
+		return nil, nil, errors.New("Service.Method ill-formatted")
+	}
+	serviceName, methodName := ss[0], ss[1]
+	service, ok := s.services[serviceName]
+	if !ok {
+		return nil, nil, fmt.Errorf("service <%s> not found", serviceName)
+	}
+	method, ok := service.methods[methodName]
+	if !ok {
+		return nil, nil, fmt.Errorf("method <%s> not found", methodName)
+	}
+	return service, method, nil
+}
+
+// Register registers a service to the default server
+func Register(rcvr interface{}) {
+	ser := newService(rcvr)
+	DefaultServer.services[ser.name] = ser
 }
