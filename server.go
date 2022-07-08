@@ -35,13 +35,14 @@ type request struct {
 }
 
 type Server struct {
-	services map[string]*service
+	// services may be accessed by multiple goroutines,
+	// and an entry is written once but read many times,
+	// so use sync.Map
+	services sync.Map 
 }
 
 func NewServer() *Server {
-	return &Server{
-		services: make(map[string]*service),
-	}
+	return &Server{}
 }
 
 var DefaultServer = NewServer()
@@ -159,19 +160,24 @@ func (s *Server) findServiceMethod(h *codec.Header) (*service, *methodType, erro
 		return nil, nil, errors.New("Service.Method ill-formatted")
 	}
 	serviceName, methodName := ss[0], ss[1]
-	service, ok := s.services[serviceName]
+	seri, ok := s.services.Load(serviceName)
 	if !ok {
 		return nil, nil, fmt.Errorf("service <%s> not found", serviceName)
 	}
-	method, ok := service.methods[methodName]
+	ser := seri.(*service)
+	method, ok := ser.methods[methodName]
 	if !ok {
 		return nil, nil, fmt.Errorf("method <%s> not found", methodName)
 	}
-	return service, method, nil
+	return ser, method, nil
 }
 
 // Register registers a service to the default server
-func Register(rcvr interface{}) {
+func Register(rcvr interface{}) error {
 	ser := newService(rcvr)
-	DefaultServer.services[ser.name] = ser
+	// DefaultServer.services[ser.name] = ser
+	if _, dup := DefaultServer.services.LoadOrStore(ser.name, ser); dup {
+		return fmt.Errorf("service %s already registered", ser.name)
+	}
+	return nil
 }

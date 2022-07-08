@@ -17,8 +17,8 @@ type Arg struct {
 
 type Reply map[string]string
 
-func (foo *Foo) Sum(arg Arg, reply Reply) error {
-	(reply)["expr"] = fmt.Sprintf("%d+%d=%d", arg.A, arg.B, arg.A+arg.B)
+func (foo *Foo) Sum(arg Arg, reply *Reply) error {
+	(*reply)["expr"] = fmt.Sprintf("%d+%d=%d", arg.A, arg.B, arg.A+arg.B)
 	return nil
 }
 
