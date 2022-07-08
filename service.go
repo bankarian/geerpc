@@ -4,12 +4,20 @@ import (
 	"go/ast"
 	"log"
 	"reflect"
+	"sync/atomic"
 )
 
 type methodType struct {
 	argType   reflect.Type
 	replyType reflect.Type
 	method    reflect.Method
+	numCalls  uint64
+}
+
+func (m *methodType) NumCalls() uint64 {
+	// numCalls is a shared and mutative, so
+	// we should consider concurrent issues
+	atomic.LoadUint64(&m.numCalls)
 }
 
 func (m *methodType) newArgRcvr() reflect.Value {
@@ -38,7 +46,7 @@ func (m *methodType) newReplyRcvr() reflect.Value {
 type service struct {
 	name    string
 	typ     reflect.Type
-	rcvr     reflect.Value
+	rcvr    reflect.Value
 	methods map[string]*methodType
 }
 
@@ -79,8 +87,8 @@ func (s *service) registerMethods() {
 			continue
 		}
 		s.methods[m.Name] = &methodType{
-			method: m,
-			argType: argType,
+			method:    m,
+			argType:   argType,
 			replyType: replyType,
 		}
 		log.Printf("rpc server: register method %s.%s\n", s.name, m.Name)
@@ -89,8 +97,9 @@ func (s *service) registerMethods() {
 
 func (s *service) call(name string, arg, reply interface{}) error {
 	method := s.methods[name]
+	atomic.AddUint64(&method.numCalls, 1)
 	res := method.method.Func.Call([]reflect.Value{
-		s.rcvr, reflect.ValueOf(arg),reflect.ValueOf(reply)})
+		s.rcvr, reflect.ValueOf(arg), reflect.ValueOf(reply)})
 	if errVal := res[0].Interface(); errVal != nil {
 		return errVal.(error)
 	}
